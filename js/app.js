@@ -306,13 +306,28 @@ const ANS = "7JaR67O07Jyk";
 const checkAnswer = (v) => { try { return btoa(unescape(encodeURIComponent((v || "").trim()))) === ANS; } catch (e) { return false; } };
 
 let appStarted = false;
+function showFatal(msg) {
+  let el = document.getElementById("fatal");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "fatal";
+    document.body.appendChild(el);
+  }
+  el.textContent = "⚠ " + msg;
+  el.style.display = "block";
+}
 async function startApp() {
   if (appStarted) return;
-  appStarted = true;
-  await store.load();
-  store.subscribe(onRemoteChange);
-  await initMap({ onOpenRegion: goRegion, onReady: updateProgress });
-  updateProgress();
+  try {
+    await store.load();
+    store.subscribe(onRemoteChange);
+    await initMap({ onOpenRegion: goRegion, onReady: updateProgress });
+    updateProgress();
+    appStarted = true;
+  } catch (e) {
+    console.error("startApp 실패:", e);
+    showFatal("불러오기 실패: " + (e.code || e.message || e));
+  }
 }
 
 // 퀴즈 통과 후: Firebase면 구글 로그인(주인만 통과), 아니면 바로 시작
@@ -320,20 +335,24 @@ async function afterGate() {
   $("#gate").classList.add("hide");
   if (!store.firebaseEnabled) { startApp(); return; }
   const login = $("#login"), btn = $("#login-go"), err = $("#login-err");
-  login.classList.remove("hide");
-  await store.initAuth();
+  // 로그인 화면을 미리 띄우지 않음 → 자동로그인 시 깜빡임 없음
+  try { await store.initAuth(); }
+  catch (e) { console.error(e); login.classList.remove("hide"); err.textContent = "인증 초기화 실패: " + (e.code || e.message); return; }
   store.onUserChanged(async (user) => {
     if (appStarted) return;
     if (user && store.isOwner(user)) { login.classList.add("hide"); startApp(); }
     else if (user && !store.isOwner(user)) {
+      login.classList.remove("hide");
       err.textContent = "허용된 계정이 아니에요 (" + (user.email || "") + ")";
       await store.signOutUser();
+    } else {
+      login.classList.remove("hide"); // 로그인 안 된 상태에서만 버튼 노출
     }
   });
   btn.onclick = async () => {
     err.textContent = "";
-    try { await store.signInGoogle(); } // 성공 시 onUserChanged가 이어받음
-    catch (e) { err.textContent = "로그인 실패/취소: " + (e.code || e.message || ""); }
+    try { await store.signInGoogle(); }
+    catch (e) { console.error(e); err.textContent = "로그인 실패: " + (e.code || e.message || ""); }
   };
 }
 
