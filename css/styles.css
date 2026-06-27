@@ -275,3 +275,22 @@ body{
 .pr-title{font-size:16px; font-weight:700; color:var(--ink);}
 .pr-meta{font-size:12.5px; color:var(--slate);}
 .act.wide{width:100%; padding:13px; font-size:14.5px; justify-content:center;}
+
+/* ===== 구글 로그인 화면 (게이트와 동일 톤) ===== */
+#login{position:absolute; inset:0; z-index:5000; padding:28px;
+  background:linear-gradient(160deg,var(--sea),var(--sea-deep));
+  display:flex; align-items:center; justify-content:center;}
+#login.hide{display:none;}
+.google-btn{width:100%; appearance:none; border:none; border-radius:13px; padding:14px;
+  font-size:15px; font-weight:800; background:#fff; color:#3c4043; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:8px;}
+.google-btn::before{content:"G"; display:inline-flex; align-items:center; justify-content:center;
+  width:22px; height:22px; border-radius:50%; background:#fff; color:#4285F4; font-weight:900;
+  border:1.5px solid #e3e3e3;}
+.google-btn:active{transform:scale(.98);}
+
+/* ===== 진행중 지역 마커 ===== */
+.regmark{display:flex; align-items:center; justify-content:center; width:26px; height:26px;
+  border-radius:50%; background:var(--coral); color:#fff; font-size:13px; font-weight:800;
+  border:2px solid #fff; box-shadow:0 2px 7px rgba(120,60,80,.45);}
+.regmark.done{background:var(--sea);}

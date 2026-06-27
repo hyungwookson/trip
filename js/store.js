@@ -24,9 +24,11 @@ async function initFirebase() {
   if (fbHandles) return fbHandles;
   const appMod = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
   const fs = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+  const authMod = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
   const app = appMod.initializeApp(CONFIG.firebase);
   const db = fs.getFirestore(app);
-  fbHandles = { fs, db };
+  const auth = authMod.getAuth(app);
+  fbHandles = { fs, db, authMod, auth };
   return fbHandles;
 }
 
@@ -104,9 +106,24 @@ const photoBackend = FIREBASE_ON ? firebasePhoto() : idbPhoto();
 // ============================================================
 export const store = {
   mode: FIREBASE_ON ? "firebase" : "local",
+  firebaseEnabled: FIREBASE_ON,
   async load() { await dataBackend.init(); },
   subscribe(cb) { onChangeCb = cb; },
   _persist() { return dataBackend.persist(); },
+
+  // ---- 구글 로그인 / 주인 확인 ----
+  async initAuth() { await initFirebase(); },
+  async onUserChanged(cb) { const { authMod, auth } = await initFirebase(); authMod.onAuthStateChanged(auth, cb); },
+  async signInGoogle() {
+    const { authMod, auth } = await initFirebase();
+    const res = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
+    return res.user;
+  },
+  async signOutUser() { const { authMod, auth } = await initFirebase(); await authMod.signOut(auth); },
+  isOwner(u) {
+    const list = (CONFIG.owners || []).map((e) => e.toLowerCase());
+    return !!(u && u.email && list.includes(u.email.toLowerCase()));
+  },
 
   // ---- plan ----
   plansFor(spotId) { return stateData.plans[spotId] || []; },

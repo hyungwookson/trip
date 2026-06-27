@@ -305,18 +305,44 @@ const PASS_KEY = "trip-pass";
 const ANS = "7JaR67O07Jyk";
 const checkAnswer = (v) => { try { return btoa(unescape(encodeURIComponent((v || "").trim()))) === ANS; } catch (e) { return false; } };
 
+let appStarted = false;
 async function startApp() {
+  if (appStarted) return;
+  appStarted = true;
   await store.load();
   store.subscribe(onRemoteChange);
   await initMap({ onOpenRegion: goRegion, onReady: updateProgress });
   updateProgress();
 }
+
+// 퀴즈 통과 후: Firebase면 구글 로그인(주인만 통과), 아니면 바로 시작
+async function afterGate() {
+  $("#gate").classList.add("hide");
+  if (!store.firebaseEnabled) { startApp(); return; }
+  const login = $("#login"), btn = $("#login-go"), err = $("#login-err");
+  login.classList.remove("hide");
+  await store.initAuth();
+  store.onUserChanged(async (user) => {
+    if (appStarted) return;
+    if (user && store.isOwner(user)) { login.classList.add("hide"); startApp(); }
+    else if (user && !store.isOwner(user)) {
+      err.textContent = "허용된 계정이 아니에요 (" + (user.email || "") + ")";
+      await store.signOutUser();
+    }
+  });
+  btn.onclick = async () => {
+    err.textContent = "";
+    try { await store.signInGoogle(); } // 성공 시 onUserChanged가 이어받음
+    catch (e) { err.textContent = "로그인 실패/취소: " + (e.code || e.message || ""); }
+  };
+}
+
 function setupGate() {
   const gate = $("#gate");
-  if (localStorage.getItem(PASS_KEY) === "1") { gate.classList.add("hide"); startApp(); return; }
+  if (localStorage.getItem(PASS_KEY) === "1") { afterGate(); return; }
   const input = $("#gate-input"), err = $("#gate-err"), card = gate.querySelector(".gate-card");
   const submit = () => {
-    if (checkAnswer(input.value)) { try { localStorage.setItem(PASS_KEY, "1"); } catch (e) {} gate.classList.add("hide"); startApp(); }
+    if (checkAnswer(input.value)) { try { localStorage.setItem(PASS_KEY, "1"); } catch (e) {} afterGate(); }
     else { err.textContent = "땡! 다시 생각해봐 😝"; card.classList.remove("gate-shake"); void card.offsetWidth; card.classList.add("gate-shake"); input.select(); }
   };
   $("#gate-go").onclick = submit;
