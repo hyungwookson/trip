@@ -17,7 +17,7 @@ export const CONFIG = {
   // 이 구글 계정만 들어오고 편집 가능 (Firestore 규칙에도 똑같이 넣어야 함)
   owners: [
     "kh517sy7@gmail.com",
-    "OWNER2@gmail.com",   // ← 상대 구글 이메일로 바꿔 넣기
+    "yboyoon@gmail.com",
   ],
 };
 
