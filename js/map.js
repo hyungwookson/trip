@@ -41,6 +41,7 @@ function buildMarkers() {
       icon: L.divIcon({ className: "", html, iconSize: [26, 26], iconAnchor: [13, 13] }),
       zIndexOffset: 1000,
     });
+    m.bindTooltip(name, { permanent: true, direction: "top", offset: [0, -14], className: "reg-tip" });
     m.on("click", () => H.onOpenRegion(code, name));
     markerLayer.addLayer(m);
   });
@@ -70,6 +71,7 @@ export async function initMap(handlers) {
   map.fitBounds(geoLayer.getBounds(), { padding: [8, 8] });
   map.setMaxBounds(KOREA_BOUNDS);      // 한국 밖으로 못 나감
   map.setMinZoom(map.getZoom());        // 더 줌아웃해서 세계지도로 못 빠짐
+  setTimeout(() => map.invalidateSize(), 60);
   if (H.onReady) H.onReady();
 }
 
