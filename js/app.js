@@ -3,7 +3,7 @@
 // ============================================================
 
 import { store } from "./store.js";
-import { esc, optionLink } from "./util.js";
+import { esc, optionLink, readPhotoDate } from "./util.js";
 import { initMap, refreshMarkers, regionCount } from "./map.js";
 
 const $ = (s) => document.querySelector(s);
@@ -12,6 +12,38 @@ const showScreen = (id) =>
 
 const current = { regionId: null, regionName: "", planId: null };
 let formCancel = () => goMap();
+
+// ---- 모션 헬퍼 ----
+function applyStagger(sel, root) {
+  (root || document).querySelectorAll(sel).forEach((el, i) => {
+    el.style.setProperty("--d", (i * 0.05).toFixed(2) + "s");
+    el.classList.add("rise");
+  });
+}
+function heartBurst(anchorEl) {
+  const r = anchorEl.getBoundingClientRect();
+  const h = document.createElement("div");
+  h.className = "heart-burst"; h.textContent = "♥";
+  h.style.left = r.left + r.width / 2 + "px";
+  h.style.top = r.top + r.height / 2 + "px";
+  document.body.appendChild(h);
+  setTimeout(() => h.remove(), 950);
+}
+function spawnPetals() {
+  const c = $("#celebrate"); if (!c) return;
+  clearPetals();
+  for (let i = 0; i < 16; i++) {
+    const s = document.createElement("span");
+    s.className = "petal"; s.textContent = "♥";
+    s.style.left = (Math.random() * 100).toFixed(1) + "%";
+    s.style.fontSize = (12 + Math.random() * 16).toFixed(0) + "px";
+    s.style.opacity = (0.5 + Math.random() * 0.45).toFixed(2);
+    s.style.animationDelay = (Math.random() * 2.4).toFixed(2) + "s";
+    s.style.animationDuration = (3.6 + Math.random() * 2.6).toFixed(2) + "s";
+    c.appendChild(s);
+  }
+}
+function clearPetals() { document.querySelectorAll("#celebrate .petal").forEach((p) => p.remove()); }
 
 // ============================================================
 // 내비게이션
@@ -22,10 +54,10 @@ function goMap() {
 }
 function goRegion(regionId, regionName) {
   current.regionId = regionId; current.regionName = regionName; current.planId = null;
-  renderRegion(); showScreen("s-region");
+  renderRegion(true); showScreen("s-region");
 }
 function goDetail(planId) {
-  current.planId = planId; renderDetail(); showScreen("s-detail");
+  current.planId = planId; renderDetail(true); showScreen("s-detail");
 }
 
 // ============================================================
@@ -37,28 +69,65 @@ function planRow(p) {
   return `<button class="plan-row" data-plan="${p.id}">
       <span class="pr-title">${esc(p.title)}</span><span class="pr-meta">${meta}</span></button>`;
 }
-function renderRegion() {
+function renderRegion(animate) {
   const id = current.regionId;
   $("#region-title").textContent = current.regionName;
   const visited = store.isVisited(id);
   const plans = store.plansFor(id);
+  const photos = store.regionPhotos(id);
   const body = $("#region-body");
+  const albumThumbs = photos.map((pid) => {
+    const pl = store.getPhotoMeta(pid).place;
+    return `<div class="mem-thumb" data-rphoto="${pid}"><img data-photo="${pid}" alt="">${pl ? `<span class="ph-cap">${esc(pl)}</span>` : ""}</div>`;
+  }).join("");
   body.innerHTML = `
     <button class="visit-toggle ${visited ? "on" : ""}" id="visit-toggle">
       ${visited ? "다녀온 곳 — 해제" : "다녀왔어요"}</button>
+    <div class="album">
+      <div class="album-head">이곳의 추억${photos.length ? ` <span class="mem-count">${photos.length}</span>` : ""}</div>
+      <div class="mem-strip">${albumThumbs}<button class="mem-add" data-act="addrphoto">＋</button></div>
+      ${photos.length ? "" : `<div class="album-hint">계획 없이 다녀온 곳도, 사진부터 남겨요.</div>`}
+    </div>
+    <div class="region-sub">여행 코스</div>
     <div class="region-plans">
       ${plans.length ? plans.map(planRow).join("") : `<div class="empty">아직 코스가 없어요.<br><b>＋ 새 코스</b>로 시작해요.</div>`}
     </div>
     <button class="act primary wide" id="region-add">＋ 새 코스 만들기</button>`;
 
-  $("#visit-toggle").onclick = async () => {
+  const toggle = $("#visit-toggle");
+  toggle.onclick = async () => {
     const nv = !store.isVisited(id);
     await store.setVisited(id, nv);
-    refreshMarkers(); renderRegion(); updateProgress();
+    refreshMarkers(); updateProgress();
+    if (nv) { toggle.classList.add("pop"); heartBurst(toggle); }
+    renderRegion(false);
     if (nv && store.visitedCount() === regionCount()) celebrate();
   };
+  body.querySelector('[data-act="addrphoto"]').onclick = () => pickRegionPhoto(id);
+  body.querySelectorAll("[data-rphoto]").forEach((el) => {
+    const pid = el.dataset.rphoto;
+    el.onclick = () => openLightbox(pid, { onDelete: () => store.deleteRegionPhoto(id, pid) });
+  });
   $("#region-add").onclick = () => goPlanForm(null);
   body.querySelectorAll("[data-plan]").forEach((el) => (el.onclick = () => goDetail(el.dataset.plan)));
+  loadThumbs();
+  if (animate) applyStagger(".plan-row", body);
+}
+function pickRegionPhoto(regionId) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    try {
+      const date = await readPhotoDate(f);
+      const id = await store.addRegionPhoto(regionId, f);
+      const meta = { place: current.regionName, date, memo: "" };
+      await store.setPhotoMeta(id, meta);
+      renderRegion(false);
+      metaSheet(meta, async (m) => { await store.setPhotoMeta(id, m); renderRegion(false); });
+    } catch (e) { alert("사진 처리 실패: " + e.message); }
+  };
+  inp.click();
 }
 
 // ============================================================
@@ -77,8 +146,18 @@ function optCard(it, op) {
   const v = store.getVote(op.id);
   const nav = navHref(op);
   const thumb = op.hasPhoto
-    ? `<div class="opt-thumb has" data-act="view"><img data-photo="${op.id}" alt=""></div>`
-    : `<div class="opt-thumb empty" data-act="addphoto"><span>사진<br>추가</span></div>`;
+    ? `<div class="opt-thumb has" data-act="view"><img data-photo="${op.id}" alt=""><span class="thumb-tag">대표</span></div>`
+    : `<div class="opt-thumb empty" data-act="addphoto"><span>대표<br>사진</span></div>`;
+  const mems = op.memories || [];
+  const memThumbs = mems.map((m) => {
+    const pl = store.getPhotoMeta(m).place;
+    return `<div class="mem-thumb" data-mem="${m}"><img data-photo="${m}" alt="">${pl ? `<span class="ph-cap">${esc(pl)}</span>` : ""}</div>`;
+  }).join("");
+  const memBlock = `
+    <div class="memories">
+      <div class="mem-label">우리 추억${mems.length ? ` <span class="mem-count">${mems.length}</span>` : ""}</div>
+      <div class="mem-strip">${memThumbs}<button class="mem-add" data-act="addmem">＋</button></div>
+    </div>`;
   return `<div class="opt-card ${sel ? "sel" : ""}" data-opt="${op.id}">
     <div class="opt-top">
       ${thumb}
@@ -100,6 +179,7 @@ function optCard(it, op) {
         <button class="mini del" data-act="del-opt">삭제</button>
       </div>
     </div>
+    ${memBlock}
   </div>`;
 }
 function slotBlock(it) {
@@ -118,7 +198,7 @@ function slotBlock(it) {
     </div>
   </div>`;
 }
-function renderDetail() {
+function renderDetail(animate) {
   const plan = store.plan(current.regionId, current.planId);
   if (!plan) return goRegion(current.regionId, current.regionName);
   $("#detail-eyebrow").textContent = current.regionName;
@@ -144,6 +224,7 @@ function renderDetail() {
     ${groupsHtml || `<div class="empty">아직 일정이 없어요.<br><b>＋ 일정 추가</b>로 시작해요.</div>`}`;
   wireDetail(plan);
   loadThumbs();
+  if (animate) applyStagger(".day", $("#detail-body"));
 }
 function wireDetail(plan) {
   const rid = current.regionId, pid = current.planId;
@@ -169,7 +250,15 @@ function wireDetail(plan) {
       on("edit-opt", () => goOptionForm(itemId, optId));
       on("del-opt", async () => { if (confirm("이 선택지를 삭제할까요?")) { await store.deleteOption(rid, pid, itemId, optId); renderDetail(); } });
       on("addphoto", () => pickPhoto(itemId, optId));
-      on("view", () => openLightbox(itemId, optId));
+      on("view", () => openLightbox(optId, {
+        onChange: () => pickPhoto(itemId, optId),
+        onDelete: () => store.deletePhoto(rid, pid, itemId, optId),
+      }));
+      on("addmem", () => pickMemory(itemId, optId));
+      card.querySelectorAll(".mem-thumb").forEach((mt) => {
+        const memId = mt.dataset.mem;
+        mt.onclick = () => openLightbox(memId, { onDelete: () => store.deleteMemory(rid, pid, itemId, memId) });
+      });
     });
   });
 }
@@ -192,20 +281,74 @@ function pickPhoto(itemId, optId) {
   };
   inp.click();
 }
-async function openLightbox(itemId, optId) {
-  const d = await store.getPhoto(optId);
+function pickMemory(itemId, optId) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    try {
+      const date = await readPhotoDate(f);
+      const op = store.option(current.regionId, current.planId, itemId, optId);
+      const id = await store.addMemory(current.regionId, current.planId, itemId, optId, f);
+      const meta = { place: (op && op.name) || current.regionName, date, memo: "" };
+      await store.setPhotoMeta(id, meta);
+      renderDetail(false);
+      metaSheet(meta, async (m) => { await store.setPhotoMeta(id, m); renderDetail(false); });
+    } catch (e) { alert("사진 처리 실패: " + e.message); }
+  };
+  inp.click();
+}
+function metaSheet({ place = "", date = "", memo = "" }, onSave) {
+  const box = document.createElement("div");
+  box.className = "sheet";
+  box.innerHTML = `<div class="sheet-card">
+    <div class="sheet-title">사진 정보</div>
+    <label class="fld"><span>장소</span><input id="m-place" type="text" value="${esc(place)}" placeholder="예) 통영 동피랑 벽화마을"></label>
+    <label class="fld"><span>날짜</span><input id="m-date" type="date" value="${esc(date)}"></label>
+    <label class="fld"><span>한마디 (선택)</span><input id="m-memo" type="text" value="${esc(memo)}" placeholder="예) 여기 회 진짜 미쳤음"></label>
+    <div class="form-actions"><button class="act" data-a="cancel">취소</button><button class="act primary" data-a="save">저장</button></div>
+  </div>`;
+  document.body.appendChild(box);
+  const close = () => box.remove();
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  box.querySelector('[data-a="cancel"]').onclick = close;
+  box.querySelector('[data-a="save"]').onclick = async () => {
+    await onSave({ place: box.querySelector("#m-place").value, date: box.querySelector("#m-date").value, memo: box.querySelector("#m-memo").value });
+    close();
+  };
+  setTimeout(() => box.querySelector("#m-place").focus(), 60);
+}
+function fmtDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s.replace(/-/g, ".") : (s || ""); }
+async function openLightbox(photoId, { onChange, onDelete } = {}) {
+  const d = await store.getPhoto(photoId);
+  const meta = store.getPhotoMeta(photoId);
   const box = document.createElement("div");
   box.className = "lightbox";
+  const cap = (meta.place || meta.date || meta.memo) ? `<div class="lb-cap">
+      ${meta.place ? `<div class="lb-place">${esc(meta.place)}</div>` : ""}
+      ${meta.date ? `<div class="lb-date">${esc(fmtDate(meta.date))}</div>` : ""}
+      ${meta.memo ? `<div class="lb-memo">${esc(meta.memo)}</div>` : ""}
+    </div>` : "";
+  const chgBtn = onChange ? `<button data-a="chg">사진 변경</button>` : "";
+  const delBtn = onDelete ? `<button data-a="del" class="del">삭제</button>` : "";
   box.innerHTML = `<div class="lb-inner"><img src="${d || ""}" alt="">
-    <div class="lb-bar"><button data-a="chg">사진 변경</button><button data-a="del" class="del">삭제</button><button data-a="close">닫기</button></div></div>`;
+    ${cap}
+    <div class="lb-bar"><button data-a="meta">정보 편집</button>${chgBtn}${delBtn}<button data-a="close">닫기</button></div></div>`;
   document.body.appendChild(box);
   const close = () => box.remove();
   box.addEventListener("click", (e) => { if (e.target === box) close(); });
   box.querySelector('[data-a="close"]').onclick = close;
-  box.querySelector('[data-a="chg"]').onclick = () => { close(); pickPhoto(itemId, optId); };
-  box.querySelector('[data-a="del"]').onclick = async () => {
-    if (confirm("사진을 삭제할까요?")) { await store.deletePhoto(current.regionId, current.planId, itemId, optId); close(); renderDetail(); }
+  box.querySelector('[data-a="meta"]').onclick = () =>
+    metaSheet(store.getPhotoMeta(photoId), async (m) => { await store.setPhotoMeta(photoId, m); close(); rerenderCurrent(); });
+  if (onChange) box.querySelector('[data-a="chg"]').onclick = () => { close(); onChange(); };
+  if (onDelete) box.querySelector('[data-a="del"]').onclick = async () => {
+    if (confirm("사진을 삭제할까요?")) { await onDelete(); close(); rerenderCurrent(); }
   };
+}
+function rerenderCurrent() {
+  const a = document.querySelector(".screen.active"); if (!a) return;
+  if (a.id === "s-region") renderRegion(false);
+  else if (a.id === "s-detail") renderDetail(false);
 }
 
 // ============================================================
@@ -288,7 +431,7 @@ function updateProgress() {
   if (fill) fill.style.width = (total ? (done / total) * 100 : 0) + "%";
   if (txt) txt.textContent = `${done} / ${total || "…"}`;
 }
-function celebrate() { const c = $("#celebrate"); if (c) c.classList.remove("hide"); }
+function celebrate() { const c = $("#celebrate"); if (c) { c.classList.remove("hide"); spawnPetals(); } }
 function onRemoteChange() {
   const active = document.querySelector(".screen.active");
   updateProgress();
@@ -372,5 +515,5 @@ function setupGate() {
 document.querySelector("#s-region .back").addEventListener("click", goMap);
 document.querySelector("#s-detail .back").addEventListener("click", () => goRegion(current.regionId, current.regionName));
 document.querySelector("#s-form .back").addEventListener("click", () => formCancel());
-document.querySelector("#cel-close").addEventListener("click", () => $("#celebrate").classList.add("hide"));
+document.querySelector("#cel-close").addEventListener("click", () => { $("#celebrate").classList.add("hide"); clearPetals(); });
 setupGate();
