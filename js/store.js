@@ -253,6 +253,13 @@ export const store = {
 
   // ---- 지역 추억 앨범(계획 없이도 그 지역에 바로) ----
   regionPhotos(regionId) { return stateData.albums[regionId] || []; },
+  regionPhotoCount(regionId) {
+    let n = (stateData.albums[regionId] || []).length;
+    for (const p of (stateData.plans[regionId] || []))
+      for (const it of p.items)
+        for (const op of it.options) { if (op.hasPhoto) n++; n += (op.memories || []).length; }
+    return n;
+  },
   async addRegionPhoto(regionId, file) {
     const id = genId();
     const dataUrl = await fileToDownscaledDataURL(file);
