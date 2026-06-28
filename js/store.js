@@ -107,7 +107,19 @@ const photoBackend = FIREBASE_ON ? firebasePhoto() : idbPhoto();
 export const store = {
   mode: FIREBASE_ON ? "firebase" : "local",
   firebaseEnabled: FIREBASE_ON,
-  async load() { await dataBackend.init(); },
+  async load() { await dataBackend.init(); await this._normalize(); },
+  async _normalize() {
+    let changed = false;
+    for (const sid in stateData.plans)
+      for (const p of (stateData.plans[sid] || []))
+        for (const it of (p.items || [])) {
+          if (!Array.isArray(it.memories)) { it.memories = []; }
+          for (const op of (it.options || [])) {
+            if (Array.isArray(op.memories) && op.memories.length) { it.memories.push(...op.memories); op.memories = []; changed = true; }
+          }
+        }
+    if (changed) { try { await this._persist(); } catch (e) {} }
+  },
   subscribe(cb) { onChangeCb = cb; },
   _persist() { return dataBackend.persist(); },
 
@@ -151,7 +163,7 @@ export const store = {
   async deletePlan(spotId, planId) {
     const list = stateData.plans[spotId] || [];
     const p = list.find((x) => x.id === planId);
-    if (p) for (const it of p.items) for (const op of it.options) await this._purgeOption(op);
+    if (p) for (const it of p.items) await this._purgeItem(it);
     stateData.plans[spotId] = list.filter((x) => x.id !== planId);
     await this._persist();
   },
@@ -160,14 +172,14 @@ export const store = {
   item(spotId, planId, itemId) { const p = this.plan(spotId, planId); return p ? p.items.find((i) => i.id === itemId) || null : null; },
   async addItem(spotId, planId, { group, time, label, kind }) {
     const p = this.plan(spotId, planId); if (!p) return null;
-    const it = { id: genId(), group: (group || "").trim(), time: (time || "").trim(), label: label.trim(), kind: kind || "place", selectedId: null, options: [] };
+    const it = { id: genId(), group: (group || "").trim(), time: (time || "").trim(), label: label.trim(), kind: kind || "place", selectedId: null, options: [], memories: [] };
     p.items.push(it); await this._persist(); return it;
   },
   async updateItem(spotId, planId, itemId, patch) { const it = this.item(spotId, planId, itemId); if (it) { Object.assign(it, patch); await this._persist(); } return it; },
   async deleteItem(spotId, planId, itemId) {
     const p = this.plan(spotId, planId); if (!p) return;
     const it = p.items.find((i) => i.id === itemId);
-    if (it) for (const op of it.options) await this._purgeOption(op);
+    if (it) await this._purgeItem(it);
     p.items = p.items.filter((i) => i.id !== itemId); await this._persist();
   },
 
@@ -175,7 +187,7 @@ export const store = {
   option(spotId, planId, itemId, optId) { const it = this.item(spotId, planId, itemId); return it ? it.options.find((o) => o.id === optId) || null : null; },
   async addOption(spotId, planId, itemId, { name, memo, url, lat, lng }) {
     const it = this.item(spotId, planId, itemId); if (!it) return null;
-    const op = { id: genId(), name: name.trim(), memo: (memo || "").trim(), url: (url || "").trim(), lat: lat || "", lng: lng || "", hasPhoto: false, memories: [] };
+    const op = { id: genId(), name: name.trim(), memo: (memo || "").trim(), url: (url || "").trim(), lat: lat || "", lng: lng || "", hasPhoto: false };
     it.options.push(op); await this._persist(); return op;
   },
   async updateOption(spotId, planId, itemId, optId, patch) { const op = this.option(spotId, planId, itemId, optId); if (op) { Object.assign(op, patch); await this._persist(); } return op; },
@@ -192,11 +204,16 @@ export const store = {
     await this._persist();
   },
   async _purgeOne(id) { photoCache.delete(id); delete stateData.photoMeta[id]; try { await photoBackend.del(id); } catch (e) {} },
+  async _purgeItem(it) {
+    if (!it) return;
+    for (const op of (it.options || [])) await this._purgeOption(op);
+    for (const m of (it.memories || [])) await this._purgeOne(m);
+  },
   async _purgeOption(op) {
     if (!op) return;
     delete stateData.votes[op.id];
     await this._purgeOne(op.id);                              // 대표 사진
-    for (const m of (op.memories || [])) await this._purgeOne(m); // 추억 사진들
+    for (const m of (op.memories || [])) await this._purgeOne(m); // (구버전 호환)
   },
 
   // ---- vote(선택지별, 둘이 공통) ----
@@ -219,19 +236,19 @@ export const store = {
     const op = this.option(spotId, planId, itemId, optId); if (op) { op.hasPhoto = false; await this._persist(); }
   },
 
-  // ---- 추억 사진(선택지별 여러 장) ----
-  async addMemory(spotId, planId, itemId, optId, file) {
-    const op = this.option(spotId, planId, itemId, optId); if (!op) return null;
+  // ---- 추억 사진(일정/슬롯 단위, 여러 장) ----
+  async addItemMemory(spotId, planId, itemId, file) {
+    const it = this.item(spotId, planId, itemId); if (!it) return null;
     const id = genId();
     const dataUrl = await fileToDownscaledDataURL(file);
     await photoBackend.set(id, dataUrl); photoCache.set(id, dataUrl);
-    (op.memories ||= []).push(id);
+    (it.memories ||= []).push(id);
     await this._persist();
     return id;
   },
-  async deleteMemory(spotId, planId, itemId, optId, memId) {
-    const op = this.option(spotId, planId, itemId, optId); if (!op) return;
-    op.memories = (op.memories || []).filter((m) => m !== memId);
+  async deleteItemMemory(spotId, planId, itemId, memId) {
+    const it = this.item(spotId, planId, itemId); if (!it) return;
+    it.memories = (it.memories || []).filter((m) => m !== memId);
     await this._purgeOne(memId);
     await this._persist();
   },
@@ -256,8 +273,7 @@ export const store = {
   regionPhotoCount(regionId) {
     let n = (stateData.albums[regionId] || []).length;
     for (const p of (stateData.plans[regionId] || []))
-      for (const it of p.items)
-        for (const op of it.options) { if (op.hasPhoto) n++; n += (op.memories || []).length; }
+      for (const it of p.items) { n += (it.memories || []).length; for (const op of it.options) if (op.hasPhoto) n++; }
     return n;
   },
   async addRegionPhoto(regionId, file) {
