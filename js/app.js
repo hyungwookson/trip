@@ -156,16 +156,6 @@ function optCard(it, op) {
   const thumb = op.hasPhoto
     ? `<div class="opt-thumb has" data-act="view"><img data-photo="${op.id}" alt=""><span class="thumb-tag">대표</span></div>`
     : `<div class="opt-thumb empty" data-act="addphoto"><span>대표<br>사진</span></div>`;
-  const mems = op.memories || [];
-  const memThumbs = mems.map((m) => {
-    const pl = store.getPhotoMeta(m).place;
-    return `<div class="mem-thumb" data-mem="${m}"><img data-photo="${m}" alt="">${pl ? `<span class="ph-cap">${esc(pl)}</span>` : ""}</div>`;
-  }).join("");
-  const memBlock = `
-    <div class="memories">
-      <div class="mem-label">우리 추억${mems.length ? ` <span class="mem-count">${mems.length}</span>` : ""}</div>
-      <div class="mem-strip">${memThumbs}<button class="mem-add" data-act="addmem">＋</button></div>
-    </div>`;
   return `<div class="opt-card ${sel ? "sel" : ""}" data-opt="${op.id}">
     <div class="opt-top">
       ${thumb}
@@ -187,7 +177,22 @@ function optCard(it, op) {
         <button class="mini del" data-act="del-opt">삭제</button>
       </div>
     </div>
-    ${memBlock}
+  </div>`;
+}
+// 확정된 장소 슬롯인가? (후보가 있으면 선택해야, 후보 없는 장소는 그 자체로 확정)
+function slotConfirmed(it) {
+  return it.kind === "place" && (it.options.length === 0 || !!it.selectedId);
+}
+function slotMemoryBlock(it) {
+  if (!slotConfirmed(it)) return "";
+  const mems = it.memories || [];
+  const thumbs = mems.map((m) => {
+    const pl = store.getPhotoMeta(m).place;
+    return `<div class="mem-thumb" data-mem="${m}"><img data-photo="${m}" alt="">${pl ? `<span class="ph-cap">${esc(pl)}</span>` : ""}</div>`;
+  }).join("");
+  return `<div class="memories slot-mem">
+    <div class="mem-label">우리 추억${mems.length ? ` <span class="mem-count">${mems.length}</span>` : ""}</div>
+    <div class="mem-strip">${thumbs}<button class="mem-add" data-act="addmem">＋</button></div>
   </div>`;
 }
 function slotBlock(it) {
@@ -199,6 +204,7 @@ function slotBlock(it) {
       ${state}
     </div>
     ${opts || `<div class="slot-empty">장소 미정 — 선택지를 추가해봐요.</div>`}
+    ${slotMemoryBlock(it)}
     <div class="slot-actions">
       <button class="add-opt" data-act="add-opt">＋ 선택지 추가</button>
       <button class="mini" data-act="edit-item">일정편집</button>
@@ -273,11 +279,13 @@ function wireDetail(plan) {
         onChange: () => pickPhoto(itemId, optId),
         onDelete: () => store.deletePhoto(rid, pid, itemId, optId),
       }));
-      on("addmem", () => pickMemory(itemId, optId));
-      card.querySelectorAll(".mem-thumb").forEach((mt) => {
-        const memId = mt.dataset.mem;
-        mt.onclick = () => openLightbox(memId, { onDelete: () => store.deleteMemory(rid, pid, itemId, memId) });
-      });
+    });
+    // 슬롯(확정된 일정) 단위 추억 사진
+    const addmem = slot.querySelector('.slot-mem [data-act="addmem"]');
+    if (addmem) addmem.onclick = () => pickItemMemory(itemId);
+    slot.querySelectorAll('.slot-mem .mem-thumb').forEach((mt) => {
+      const memId = mt.dataset.mem;
+      mt.onclick = () => openLightbox(memId, { onDelete: () => store.deleteItemMemory(rid, pid, itemId, memId) });
     });
   });
 }
@@ -300,16 +308,18 @@ function pickPhoto(itemId, optId) {
   };
   inp.click();
 }
-function pickMemory(itemId, optId) {
+function pickItemMemory(itemId) {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "image/*";
   inp.onchange = async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
     try {
       const date = await readPhotoDate(f);
-      const op = store.option(current.regionId, current.planId, itemId, optId);
-      const id = await store.addMemory(current.regionId, current.planId, itemId, optId, f);
-      const meta = { place: (op && op.name) || current.regionName, date, memo: "" };
+      const it = store.item(current.regionId, current.planId, itemId);
+      const selOpt = it && it.selectedId ? it.options.find((o) => o.id === it.selectedId) : null;
+      const place = (selOpt && selOpt.name) || (it && it.label) || current.regionName;
+      const id = await store.addItemMemory(current.regionId, current.planId, itemId, f);
+      const meta = { place, date, memo: "" };
       await store.setPhotoMeta(id, meta);
       renderDetail(false);
       metaSheet(meta, async (m) => { await store.setPhotoMeta(id, m); renderDetail(false); });
