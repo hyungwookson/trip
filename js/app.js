@@ -425,11 +425,23 @@ function goOptionForm(itemId, optId) {
 // ============================================================
 // 진행도 / 축하 / 원격변경
 // ============================================================
+const STEPS = 14;
+function footSVG() {
+  return `<svg viewBox="0 0 20 28" fill="currentColor" aria-hidden="true">
+    <ellipse cx="10" cy="18.5" rx="6" ry="8.5"/>
+    <circle cx="5.6" cy="7.5" r="1.6"/><circle cx="9.4" cy="5.3" r="1.9"/><circle cx="13.4" cy="7" r="1.6"/>
+  </svg>`;
+}
 function updateProgress() {
   const total = regionCount(), done = store.visitedCount();
-  const fill = $("#prog-fill"), txt = $("#prog-txt");
-  if (fill) fill.style.width = (total ? (done / total) * 100 : 0) + "%";
-  if (txt) txt.textContent = `${done} / ${total || "…"}`;
+  const txt = $("#prog-txt"); if (txt) txt.textContent = `${done} / ${total || "…"}`;
+  const trail = $("#prog-trail"); if (!trail) return;
+  if (trail.childElementCount !== STEPS) {
+    trail.innerHTML = "";
+    for (let i = 0; i < STEPS; i++) { const s = document.createElement("span"); s.className = "step"; s.innerHTML = footSVG(); trail.appendChild(s); }
+  }
+  const lit = total ? Math.round((done / total) * STEPS) : 0;
+  trail.querySelectorAll(".step").forEach((s, i) => s.classList.toggle("on", i < lit));
 }
 function celebrate() { const c = $("#celebrate"); if (c) { c.classList.remove("hide"); spawnPetals(); } }
 function onRemoteChange() {
