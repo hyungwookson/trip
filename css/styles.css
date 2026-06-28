@@ -1,5 +1,5 @@
 /* ============================================================
-   우리 바다 여행 — "노을(Noeul)" 디자인 시스템
+   우리의 발자취 — "노을(Noeul)" 디자인 시스템
    해질녘 바닷가의 설렘 · 프리미엄 데이팅 무드
    ============================================================ */
 
@@ -166,13 +166,16 @@ body{
 .prog-top{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:11px;}
 .prog-top b{font-family:var(--serif); font-size:15px; font-weight:700; color:var(--ink); letter-spacing:-.01em;}
 .prog-top #prog-txt{font-size:13px; font-weight:800; color:var(--rose); letter-spacing:.02em;}
-.prog-bar{position:relative; height:10px; border-radius:999px; background:var(--blush); overflow:hidden;}
-#prog-fill{
-  position:relative; height:100%; width:0%; border-radius:999px;
-  background:var(--sun-grad); background-size:200% 100%;
-  transition:width .7s cubic-bezier(.3,0,.2,1); animation:shimmer 3.2s linear infinite;
+.prog-trail{display:flex; align-items:center; gap:1px; height:32px; padding:0 2px;}
+.step{
+  flex:1 1 0; height:26px; display:flex; align-items:center; justify-content:center;
+  color:#edd9df; transition:color .5s ease, transform .5s ease;
 }
-@keyframes shimmer{0%{background-position:0% 0}100%{background-position:200% 0}}
+.step svg{width:14px; height:21px; display:block;}
+.step:nth-child(odd){transform:translateY(-3px) rotate(-11deg);}
+.step:nth-child(even){transform:translateY(4px) rotate(11deg);}
+.step.on{color:var(--rose);}
+.step.on svg{filter:drop-shadow(0 2px 5px rgba(226,96,124,.5));}
 
 /* 진행중 지역 마커 */
 .regmark{
