@@ -43,15 +43,24 @@ function buildMarkers() {
     const code = l.feature.properties.code;
     const name = l.feature.properties.name;
     const plans = store.plansFor(code);
-    if (!plans.length) return; // 코스 없는 지역은 마커 없음
-    const undecided = plans.reduce((n, p) => n + store.planUndecided(p), 0);
-    const pending = undecided > 0;
-    const html = `<div class="regmark ${pending ? "" : "done"}">${pending ? undecided : "♥"}</div>`;
+    const photoCount = store.regionPhotoCount(code);
+    if (!plans.length && photoCount === 0) return; // 일정도 사진도 없으면 마커 없음
+
+    let cls, label;
+    if (!plans.length) {            // 사진만 있는 지역
+      cls = "photo"; label = "";
+    } else {
+      const undecided = plans.reduce((n, p) => n + store.planUndecided(p), 0);
+      if (undecided > 0) { cls = "pending"; label = undecided; } // 일정 진행중
+      else { cls = "done"; label = "♥"; }                        // 일정 결정됨
+    }
+    const badge = (plans.length && photoCount > 0) ? `<span class="ph-dot"></span>` : "";
+    const html = `<div class="regmark ${cls}">${label}${badge}</div>`;
     const m = L.marker(l.getBounds().getCenter(), {
-      icon: L.divIcon({ className: "", html, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      icon: L.divIcon({ className: "", html, iconSize: [30, 30], iconAnchor: [15, 15] }),
       zIndexOffset: 1000,
     });
-    m.bindTooltip(name, { permanent: true, direction: "top", offset: [0, -14], className: "reg-tip" });
+    m.bindTooltip(name, { permanent: true, direction: "top", offset: [0, -15], className: "reg-tip" });
     m.on("click", () => H.onOpenRegion(code, name));
     markerLayer.addLayer(m);
   });
