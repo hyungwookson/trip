@@ -12,7 +12,12 @@ let map = null, geoLayer = null, markerLayer = null, total = 0;
 
 const C_VISITED = "#ef6f87";
 const C_PLANNED = "#f6c2cf";
-const C_PLAIN   = "#ead9de";
+// 안 간 지역: 인접끼리 구분되도록 옅은 톤을 코드 해시로 번갈아
+const PLAIN_TINTS = ["#ecdbe0", "#e4cfd6", "#f1e1e5", "#e7d3da", "#eed8de"];
+function plainTint(code) {
+  let h = 0; for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
+  return PLAIN_TINTS[h % PLAIN_TINTS.length];
+}
 
 const KOREA_BOUNDS = L.latLngBounds([32.9, 124.4], [39.0, 132.2]);
 
@@ -20,12 +25,17 @@ function styleFor(feat) {
   const id = feat.properties.code;
   const visited = store.isVisited(id);
   const planned = store.plansFor(id).length > 0;
-  return {
-    fillColor: visited ? C_VISITED : planned ? C_PLANNED : C_PLAIN,
-    fillOpacity: visited ? 0.85 : planned ? 0.7 : 0.5,
-    color: "#ffffff", weight: 0.7,
-  };
+  const fill = visited ? C_VISITED : planned ? C_PLANNED : plainTint(id);
+  const op = visited ? 0.88 : planned ? 0.78 : 0.82;
+  return { fillColor: fill, fillOpacity: op, color: "#ffffff", weight: 1.1, opacity: 1 };
 }
+function hoverOn(e) {
+  const l = e.target;
+  l.setStyle({ weight: 2.8, color: "#ffffff", fillOpacity: 0.95 });
+  if (l.bringToFront) l.bringToFront();
+  if (map) map.getContainer().style.cursor = "pointer";
+}
+function hoverOff(e) { if (geoLayer) geoLayer.resetStyle(e.target); if (map) map.getContainer().style.cursor = ""; }
 
 function buildMarkers() {
   markerLayer.clearLayers();
@@ -62,7 +72,11 @@ export async function initMap(handlers) {
 
   geoLayer = L.geoJSON(gj, {
     style: styleFor,
-    onEachFeature: (feat, layer) => layer.on("click", () => H.onOpenRegion(feat.properties.code, feat.properties.name)),
+    onEachFeature: (feat, layer) => layer.on({
+      mouseover: hoverOn,
+      mouseout: hoverOff,
+      click: () => H.onOpenRegion(feat.properties.code, feat.properties.name),
+    }),
   }).addTo(map);
 
   markerLayer = L.layerGroup().addTo(map);
