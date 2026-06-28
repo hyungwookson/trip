@@ -11,7 +11,7 @@ import { SEED } from "./data.js";
 import { CONFIG, FIREBASE_ON } from "./config.js";
 import { fileToDownscaledDataURL } from "./util.js";
 
-const stateData = { plans: {}, votes: {}, visited: {} };
+const stateData = { plans: {}, votes: {}, visited: {}, albums: {}, photoMeta: {} };
 const clone = (x) => JSON.parse(JSON.stringify(x));
 export const genId = () => Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
 
@@ -42,29 +42,29 @@ function firebaseData() {
       const h = await initFirebase(); fs = h.fs;
       ref = fs.doc(h.db, "trips", CONFIG.tripId);
       const snap = await fs.getDoc(ref);
-      if (snap.exists()) { const d = snap.data(); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; }
-      else { stateData.plans = clone(SEED); stateData.votes = {}; stateData.visited = {}; await fs.setDoc(ref, { plans: stateData.plans, votes: stateData.votes, visited: stateData.visited }); }
+      if (snap.exists()) { const d = snap.data(); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; stateData.albums = d.albums || {}; stateData.photoMeta = d.photoMeta || {}; }
+      else { stateData.plans = clone(SEED); stateData.votes = {}; stateData.visited = {}; stateData.albums = {}; stateData.photoMeta = {}; await fs.setDoc(ref, { plans: stateData.plans, votes: stateData.votes, visited: stateData.visited, albums: stateData.albums, photoMeta: stateData.photoMeta }); }
       fs.onSnapshot(ref, (s) => {
         if (!s.exists()) return;
-        const d = s.data(); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {};
+        const d = s.data(); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; stateData.albums = d.albums || {}; stateData.photoMeta = d.photoMeta || {};
         if (onChangeCb) onChangeCb();
       });
     },
-    async persist() { await fs.setDoc(ref, { plans: stateData.plans, votes: stateData.votes, visited: stateData.visited }); },
+    async persist() { await fs.setDoc(ref, { plans: stateData.plans, votes: stateData.votes, visited: stateData.visited, albums: stateData.albums, photoMeta: stateData.photoMeta }); },
   };
 }
 function localData() {
-  const KEY = "trip-data-v2";
+  const KEY = "trip-data-v3";
   return {
     async init() {
       try {
         const raw = localStorage.getItem(KEY);
-        if (raw) { const d = JSON.parse(raw); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; return; }
+        if (raw) { const d = JSON.parse(raw); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; stateData.albums = d.albums || {}; stateData.photoMeta = d.photoMeta || {}; return; }
       } catch (e) {}
-      stateData.plans = clone(SEED); stateData.votes = {}; stateData.visited = {}; await this.persist();
+      stateData.plans = clone(SEED); stateData.votes = {}; stateData.visited = {}; stateData.albums = {}; stateData.photoMeta = {}; await this.persist();
     },
     async persist() {
-      try { localStorage.setItem(KEY, JSON.stringify({ plans: stateData.plans, votes: stateData.votes, visited: stateData.visited })); }
+      try { localStorage.setItem(KEY, JSON.stringify({ plans: stateData.plans, votes: stateData.votes, visited: stateData.visited, albums: stateData.albums, photoMeta: stateData.photoMeta })); }
       catch (e) { console.warn("저장 실패(용량 초과 가능):", e); }
     },
   };
@@ -112,12 +112,27 @@ export const store = {
   _persist() { return dataBackend.persist(); },
 
   // ---- 구글 로그인 / 주인 확인 ----
-  async initAuth() { await initFirebase(); },
+  async initAuth() {
+    const { authMod, auth } = await initFirebase();
+    try { await authMod.getRedirectResult(auth); } catch (e) { console.error("redirect result:", e); }
+  },
   async onUserChanged(cb) { const { authMod, auth } = await initFirebase(); authMod.onAuthStateChanged(auth, cb); },
   async signInGoogle() {
     const { authMod, auth } = await initFirebase();
-    const res = await authMod.signInWithPopup(auth, new authMod.GoogleAuthProvider());
-    return res.user;
+    const provider = new authMod.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" }); // 계정 선택창(비번 입력 대신 탭)
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) { await authMod.signInWithRedirect(auth, provider); return null; } // 폰: 리다이렉트
+    try {
+      const res = await authMod.signInWithPopup(auth, provider);
+      return res.user;
+    } catch (e) {
+      // 팝업이 막히면 리다이렉트로 대체
+      if (["auth/popup-blocked", "auth/popup-closed-by-user", "auth/cancelled-popup-request", "auth/operation-not-supported-in-this-environment"].includes(e.code)) {
+        await authMod.signInWithRedirect(auth, provider); return null;
+      }
+      throw e;
+    }
   },
   async signOutUser() { const { authMod, auth } = await initFirebase(); await authMod.signOut(auth); },
   isOwner(u) {
@@ -136,7 +151,7 @@ export const store = {
   async deletePlan(spotId, planId) {
     const list = stateData.plans[spotId] || [];
     const p = list.find((x) => x.id === planId);
-    if (p) for (const it of p.items) for (const op of it.options) await this._purgeOption(op.id);
+    if (p) for (const it of p.items) for (const op of it.options) await this._purgeOption(op);
     stateData.plans[spotId] = list.filter((x) => x.id !== planId);
     await this._persist();
   },
@@ -152,7 +167,7 @@ export const store = {
   async deleteItem(spotId, planId, itemId) {
     const p = this.plan(spotId, planId); if (!p) return;
     const it = p.items.find((i) => i.id === itemId);
-    if (it) for (const op of it.options) await this._purgeOption(op.id);
+    if (it) for (const op of it.options) await this._purgeOption(op);
     p.items = p.items.filter((i) => i.id !== itemId); await this._persist();
   },
 
@@ -160,22 +175,29 @@ export const store = {
   option(spotId, planId, itemId, optId) { const it = this.item(spotId, planId, itemId); return it ? it.options.find((o) => o.id === optId) || null : null; },
   async addOption(spotId, planId, itemId, { name, memo, url, lat, lng }) {
     const it = this.item(spotId, planId, itemId); if (!it) return null;
-    const op = { id: genId(), name: name.trim(), memo: (memo || "").trim(), url: (url || "").trim(), lat: lat || "", lng: lng || "", hasPhoto: false };
+    const op = { id: genId(), name: name.trim(), memo: (memo || "").trim(), url: (url || "").trim(), lat: lat || "", lng: lng || "", hasPhoto: false, memories: [] };
     it.options.push(op); await this._persist(); return op;
   },
   async updateOption(spotId, planId, itemId, optId, patch) { const op = this.option(spotId, planId, itemId, optId); if (op) { Object.assign(op, patch); await this._persist(); } return op; },
   async deleteOption(spotId, planId, itemId, optId) {
     const it = this.item(spotId, planId, itemId); if (!it) return;
+    const op = it.options.find((o) => o.id === optId);
     it.options = it.options.filter((o) => o.id !== optId);
     if (it.selectedId === optId) it.selectedId = null;
-    await this._purgeOption(optId); await this._persist();
+    await this._purgeOption(op); await this._persist();
   },
   async selectOption(spotId, planId, itemId, optId) {
     const it = this.item(spotId, planId, itemId); if (!it) return;
     it.selectedId = it.selectedId === optId ? null : optId; // 다시 누르면 해제
     await this._persist();
   },
-  async _purgeOption(optId) { delete stateData.votes[optId]; photoCache.delete(optId); try { await photoBackend.del(optId); } catch (e) {} },
+  async _purgeOne(id) { photoCache.delete(id); delete stateData.photoMeta[id]; try { await photoBackend.del(id); } catch (e) {} },
+  async _purgeOption(op) {
+    if (!op) return;
+    delete stateData.votes[op.id];
+    await this._purgeOne(op.id);                              // 대표 사진
+    for (const m of (op.memories || [])) await this._purgeOne(m); // 추억 사진들
+  },
 
   // ---- vote(선택지별, 둘이 공통) ----
   getVote(optId) { return stateData.votes[optId] || 0; },
@@ -197,6 +219,23 @@ export const store = {
     const op = this.option(spotId, planId, itemId, optId); if (op) { op.hasPhoto = false; await this._persist(); }
   },
 
+  // ---- 추억 사진(선택지별 여러 장) ----
+  async addMemory(spotId, planId, itemId, optId, file) {
+    const op = this.option(spotId, planId, itemId, optId); if (!op) return null;
+    const id = genId();
+    const dataUrl = await fileToDownscaledDataURL(file);
+    await photoBackend.set(id, dataUrl); photoCache.set(id, dataUrl);
+    (op.memories ||= []).push(id);
+    await this._persist();
+    return id;
+  },
+  async deleteMemory(spotId, planId, itemId, optId, memId) {
+    const op = this.option(spotId, planId, itemId, optId); if (!op) return;
+    op.memories = (op.memories || []).filter((m) => m !== memId);
+    await this._purgeOne(memId);
+    await this._persist();
+  },
+
   // ---- 다녀옴(지역 단위) ----
   isVisited(spotId) { return !!stateData.visited[spotId]; },
   async setVisited(spotId, val) {
@@ -204,6 +243,29 @@ export const store = {
     await this._persist();
   },
   visitedCount() { return Object.keys(stateData.visited).filter((k) => stateData.visited[k]).length; },
+
+  // ---- 사진 정보(장소/날짜/메모) ----
+  getPhotoMeta(id) { return stateData.photoMeta[id] || {}; },
+  async setPhotoMeta(id, m) {
+    stateData.photoMeta[id] = { place: (m.place || "").trim(), date: m.date || "", memo: (m.memo || "").trim() };
+    await this._persist();
+  },
+
+  // ---- 지역 추억 앨범(계획 없이도 그 지역에 바로) ----
+  regionPhotos(regionId) { return stateData.albums[regionId] || []; },
+  async addRegionPhoto(regionId, file) {
+    const id = genId();
+    const dataUrl = await fileToDownscaledDataURL(file);
+    await photoBackend.set(id, dataUrl); photoCache.set(id, dataUrl);
+    (stateData.albums[regionId] ||= []).push(id);
+    await this._persist();
+    return id;
+  },
+  async deleteRegionPhoto(regionId, photoId) {
+    stateData.albums[regionId] = (stateData.albums[regionId] || []).filter((p) => p !== photoId);
+    await this._purgeOne(photoId);
+    await this._persist();
+  },
 
   // ---- 미정(아직 안 정한 장소) 카운트 ----
   planUndecided(plan) { return plan.items.filter((it) => it.kind === "place" && !it.selectedId).length; },
