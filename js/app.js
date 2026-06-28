@@ -133,8 +133,16 @@ function pickRegionPhoto(regionId) {
 // ============================================================
 // 상세 (일정표)
 // ============================================================
+function parseStart(t) {
+  const m = (t || "").match(/(\d{1,2}):(\d{2})/);
+  return m ? (+m[1]) * 60 + (+m[2]) : Infinity;
+}
 function noteRow(it) {
-  return `<div class="note-row"><span class="nt-time">${esc(it.time)}</span><span class="nt-label">${esc(it.label)}</span></div>`;
+  return `<div class="note-row" data-item="${it.id}">
+    <span class="nt-time">${esc(it.time)}</span>
+    <span class="nt-label">${esc(it.label)}</span>
+    <span class="nt-edit"><button class="mini" data-act="edit-item">편집</button><button class="mini del" data-act="del-item">삭제</button></span>
+  </div>`;
 }
 function navHref(op) {
   if (op.lat && op.lng)
@@ -210,6 +218,10 @@ function renderDetail(animate) {
     if (!g) { g = { name: it.group, items: [] }; groups.push(g); }
     g.items.push(it);
   });
+  groups.forEach((g) => g.items.sort((a, b) => {
+    const sa = parseStart(a.time), sb = parseStart(b.time);
+    return sa === sb ? 0 : sa - sb;
+  }));
   const groupsHtml = groups.map((g) => `
     <div class="day"><div class="day-head">${esc(g.name) || "일정"}</div>
       ${g.items.map((it) => (it.kind === "note" ? noteRow(it) : slotBlock(it))).join("")}
@@ -234,6 +246,13 @@ function wireDetail(plan) {
   body.querySelector('[data-act="del-plan"]').onclick = async () => {
     if (confirm(`'${plan.title}' 코스를 삭제할까요?`)) { await store.deletePlan(rid, pid); goRegion(rid, current.regionName); }
   };
+  body.querySelectorAll(".note-row").forEach((nr) => {
+    const itemId = nr.dataset.item;
+    nr.querySelector('[data-act="edit-item"]').onclick = () => goItemForm(itemId);
+    nr.querySelector('[data-act="del-item"]').onclick = async () => {
+      if (confirm("이 일정을 삭제할까요?")) { await store.deleteItem(rid, pid, itemId); renderDetail(); }
+    };
+  });
   body.querySelectorAll(".slot").forEach((slot) => {
     const itemId = slot.dataset.item;
     slot.querySelector('[data-act="add-opt"]').onclick = () => goOptionForm(itemId, null);
@@ -387,13 +406,20 @@ function goItemForm(itemId) {
   const it = editing ? store.item(rid, pid, itemId) : { group: "", time: "", label: "", kind: "place" };
   const back = () => goDetail(pid);
   const [ts, te] = (it.time || "").split("~").map((s) => (s || "").trim());
+  const groups = [...new Set((store.plan(rid, pid).items || []).map((x) => x.group).filter(Boolean))];
+  const chips = groups.length
+    ? `<div class="grp-chips">${groups.map((g) => `<button type="button" class="grp-chip ${g === it.group ? "on" : ""}" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
+    : "";
   openForm(editing ? "일정 편집" : "일정 추가",
     `<div class="fld"><span>종류</span><div class="seg-group" id="f-kind">
         <button type="button" class="seg ${it.kind === "place" ? "on" : ""}" data-kind="place">장소(선택지)</button>
         <button type="button" class="seg ${it.kind === "note" ? "on" : ""}" data-kind="note">단순 일정</button></div></div>
-     <label class="fld"><span>그룹 / 날짜</span><input id="f-group" type="text" placeholder="예) 7/17 (목)  또는  숙소" value="${esc(it.group)}"></label>
+     <div class="fld"><span>날짜 / 그룹</span>${chips}
+        <input id="f-group" type="text" placeholder="예) 7/17 (목)  또는  숙소" value="${esc(it.group)}">
+        <span class="hint">기존 날짜를 누르거나 새로 입력하면 돼요.</span></div>
      <div class="fld"><span>시간 (선택)</span><div class="time-row">
-        <input id="f-ts" type="time" value="${esc(ts || "")}"><span class="time-sep">~</span><input id="f-te" type="time" value="${esc(te || "")}"></div></div>
+        <input id="f-ts" type="time" value="${esc(ts || "")}"><span class="time-sep">~</span><input id="f-te" type="time" value="${esc(te || "")}"></div>
+        <span class="hint">시간을 넣으면 그 날짜 안에서 시간순으로 자동 정렬돼요.</span></div>
      <label class="fld"><span>내용</span><input id="f-label" type="text" placeholder="예) 오후 전시" value="${esc(it.label)}"></label>`,
     async () => {
       const label = $("#f-label").value.trim(); if (!label) return alert("내용을 입력해줘.");
@@ -404,6 +430,11 @@ function goItemForm(itemId) {
       goDetail(pid);
     }, back);
   segToggle("#f-kind");
+  document.querySelectorAll(".grp-chip").forEach((c) => c.onclick = () => {
+    $("#f-group").value = c.dataset.g;
+    document.querySelectorAll(".grp-chip").forEach((x) => x.classList.remove("on"));
+    c.classList.add("on");
+  });
 }
 function goOptionForm(itemId, optId) {
   const rid = current.regionId, pid = current.planId, editing = !!optId;
