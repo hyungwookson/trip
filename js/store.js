@@ -111,13 +111,28 @@ export const store = {
   async _normalize() {
     let changed = false;
     for (const sid in stateData.plans)
-      for (const p of (stateData.plans[sid] || []))
+      for (const p of (stateData.plans[sid] || [])) {
         for (const it of (p.items || [])) {
           if (!Array.isArray(it.memories)) { it.memories = []; }
           for (const op of (it.options || [])) {
             if (Array.isArray(op.memories) && op.memories.length) { it.memories.push(...op.memories); op.memories = []; changed = true; }
           }
         }
+        // 구버전: 통합 "숙소" 그룹 → 각 날짜에 숙소 일정으로 복제 (원본 "숙소" 그룹은 제거)
+        const stayItems = (p.items || []).filter((it) => it.group === "숙소");
+        const dayGroups = [...new Set((p.items || []).filter((it) => it.group && it.group !== "숙소").map((it) => it.group))];
+        if (stayItems.length && dayGroups.length) {
+          const dupes = [];
+          for (const day of dayGroups)
+            for (const s of stayItems)
+              dupes.push({
+                id: genId(), group: day, time: s.time || "숙박", label: "숙소", kind: "place", selectedId: null, memories: [],
+                options: (s.options || []).map((o) => ({ id: genId(), name: o.name, memo: o.memo || "", url: o.url || "", lat: o.lat || "", lng: o.lng || "", hasPhoto: false })),
+              });
+          p.items = (p.items || []).filter((it) => it.group !== "숙소").concat(dupes);
+          changed = true;
+        }
+      }
     if (changed) { try { await this._persist(); } catch (e) {} }
   },
   subscribe(cb) { onChangeCb = cb; },
