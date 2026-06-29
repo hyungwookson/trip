@@ -139,9 +139,13 @@ function parseStart(t) {
 }
 function formatDay(name, year) {
   if (!name) return "일정";
-  if (/\d{4}/.test(name)) return name;                       // 이미 연도 있음
-  if (/^\s*\d{1,2}\s*\/\s*\d{1,2}/.test(name) && year) return `${year}. ${name}`; // M/D 형태면 연도 붙임
-  return name;
+  const m = name.match(/^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*(.*)$/);
+  if (m && year) {
+    const mm = String(+m[1]).padStart(2, "0"), dd = String(+m[2]).padStart(2, "0");
+    const rest = (m[3] || "").trim();
+    return `${year}.${mm}.${dd}${rest ? " " + rest : ""}`;  // 2026.07.16 (수)
+  }
+  return name; // 날짜 형태가 아니면(예: 숙소) 그대로
 }
 function noteRow(it) {
   return `<div class="note-row" data-item="${it.id}">
