@@ -40,7 +40,7 @@ export const SEED = {
           o("o-717a1", "강릉 아르떼 뮤지엄", "더운 날 Ver · 실내 미디어아트", "https://m.blog.naver.com/rambo3/224324838400"),
           o("o-717a2", "하슬라 아트월드", "시원·추운 날 Ver · 바다정원+미술관", "https://m.blog.naver.com/baram1178/224325726630"),
         ]},
-        { id: "it-717-5", group: "7/17 (목)", time: "15:00~17:00", label: "강릉 아라나비", kind: "place", selectedId: "o-717b1", options: [
+        { id: "it-717-5", group: "7/17 (목)", time: "15:00~17:00", label: "강릉 아라나비", kind: "place", selectedId: null, options: [
           o("o-717b1", "아라나비 (하늘자전거 & 짚라인)", "", "https://m.blog.naver.com/haha4798/224313520751"),
         ]},
         { id: "it-717-6", group: "7/17 (목)", time: "17:00~18:00", label: "숙소 도착", kind: "note", selectedId: null, options: [] },
