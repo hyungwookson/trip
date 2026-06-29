@@ -170,8 +170,8 @@ export const store = {
   // ---- plan ----
   plansFor(spotId) { return stateData.plans[spotId] || []; },
   plan(spotId, planId) { return this.plansFor(spotId).find((p) => p.id === planId) || null; },
-  async addPlan(spotId, { title, days }) {
-    const p = { id: genId(), title: title.trim(), days: (days || "").trim(), items: [] };
+  async addPlan(spotId, { title, days, year }) {
+    const p = { id: genId(), title: title.trim(), days: (days || "").trim(), year: year || new Date().getFullYear(), items: [] };
     (stateData.plans[spotId] ||= []).push(p); await this._persist(); return p;
   },
   async updatePlan(spotId, planId, patch) { const p = this.plan(spotId, planId); if (p) { Object.assign(p, patch); await this._persist(); } return p; },
