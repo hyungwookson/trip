@@ -145,18 +145,18 @@ export const store = {
   },
   async onUserChanged(cb) { const { authMod, auth } = await initFirebase(); authMod.onAuthStateChanged(auth, cb); },
   async signInGoogle() {
-    const { authMod, auth } = await initFirebase();
-    const provider = new authMod.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" }); // 계정 선택창(비번 입력 대신 탭)
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile) { await authMod.signInWithRedirect(auth, provider); return null; } // 폰: 리다이렉트
+    const h = fbHandles || await initFirebase();
+    const provider = new h.authMod.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS) { await h.authMod.signInWithRedirect(h.auth, provider); return null; } // iOS: 리다이렉트(ITP 안정)
     try {
-      const res = await authMod.signInWithPopup(auth, provider);
+      const res = await h.authMod.signInWithPopup(h.auth, provider);
       return res.user;
     } catch (e) {
-      // 팝업이 막히면 리다이렉트로 대체
-      if (["auth/popup-blocked", "auth/popup-closed-by-user", "auth/cancelled-popup-request", "auth/operation-not-supported-in-this-environment"].includes(e.code)) {
-        await authMod.signInWithRedirect(auth, provider); return null;
+      if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+        await h.authMod.signInWithRedirect(h.auth, provider); return null;
       }
       throw e;
     }
