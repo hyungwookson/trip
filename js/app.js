@@ -65,7 +65,9 @@ function goDetail(planId) {
 // ============================================================
 function planRow(p) {
   const left = store.planUndecided(p);
-  const meta = `${esc(p.days)} · ${left === 0 ? "다 정함" : "미정 " + left}`;
+  const year = p.year || new Date().getFullYear();
+  const parts = [String(year), p.days, left === 0 ? "다 정함" : "미정 " + left].filter(Boolean);
+  const meta = parts.map(esc).join(" · ");
   return `<button class="plan-row" data-plan="${p.id}">
       <span class="pr-title">${esc(p.title)}</span><span class="pr-meta">${meta}</span></button>`;
 }
@@ -137,15 +139,20 @@ function parseStart(t) {
   const m = (t || "").match(/(\d{1,2}):(\d{2})/);
   return m ? (+m[1]) * 60 + (+m[2]) : Infinity;
 }
+const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 function formatDay(name, year) {
   if (!name) return "일정";
   const m = name.match(/^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*(.*)$/);
   if (m && year) {
-    const mm = String(+m[1]).padStart(2, "0"), dd = String(+m[2]).padStart(2, "0");
-    const rest = (m[3] || "").trim();
-    return `${year}.${mm}.${dd}${rest ? " " + rest : ""}`;  // 2026.07.16 (수)
+    const mo = +m[1], d = +m[2];
+    const mm = String(mo).padStart(2, "0"), dd = String(d).padStart(2, "0");
+    const dt = new Date(year, mo - 1, d); // 로컬 기준(UTC 밀림 없음)
+    const valid = dt.getFullYear() === year && dt.getMonth() === mo - 1 && dt.getDate() === d;
+    let rest = (m[3] || "").trim().replace(/^\(\s*[일월화수목금토]\s*\)\s*/, ""); // 잘못 적힌 요일 제거
+    const wd = valid ? ` (${WEEKDAY[dt.getDay()]})` : "";
+    return `${year}.${mm}.${dd}${wd}${rest ? " " + rest : ""}`;
   }
-  return name; // 날짜 형태가 아니면(예: 숙소) 그대로
+  return name; // 날짜 형태 아니면(예: 숙소) 그대로
 }
 function noteRow(it) {
   return `<div class="note-row" data-item="${it.id}">
