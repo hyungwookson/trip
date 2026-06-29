@@ -137,6 +137,12 @@ function parseStart(t) {
   const m = (t || "").match(/(\d{1,2}):(\d{2})/);
   return m ? (+m[1]) * 60 + (+m[2]) : Infinity;
 }
+function formatDay(name, year) {
+  if (!name) return "일정";
+  if (/\d{4}/.test(name)) return name;                       // 이미 연도 있음
+  if (/^\s*\d{1,2}\s*\/\s*\d{1,2}/.test(name) && year) return `${year}. ${name}`; // M/D 형태면 연도 붙임
+  return name;
+}
 function noteRow(it) {
   return `<div class="note-row" data-item="${it.id}">
     <span class="nt-time">${esc(it.time)}</span>
@@ -228,8 +234,9 @@ function renderDetail(animate) {
     const sa = parseStart(a.time), sb = parseStart(b.time);
     return sa === sb ? 0 : sa - sb;
   }));
+  const planYear = plan.year || new Date().getFullYear();
   const groupsHtml = groups.map((g) => `
-    <div class="day"><div class="day-head">${esc(g.name) || "일정"}</div>
+    <div class="day"><div class="day-head">${esc(formatDay(g.name, planYear))}</div>
       ${g.items.map((it) => (it.kind === "note" ? noteRow(it) : slotBlock(it))).join("")}
     </div>`).join("");
 
@@ -399,16 +406,19 @@ function segToggle(sel) {
 
 function goPlanForm(planId) {
   const rid = current.regionId, editing = !!planId;
-  const p = editing ? store.plan(rid, planId) : { title: "", days: "" };
+  const p = editing ? store.plan(rid, planId) : { title: "", days: "", year: new Date().getFullYear() };
   const back = () => (editing ? goDetail(planId) : goRegion(rid, current.regionName));
   openForm(editing ? "코스 편집" : "새 코스",
     `<label class="fld"><span>코스 이름</span><input id="f-title" type="text" placeholder="예) 강릉 2박3일" value="${esc(p.title)}"></label>
+     <label class="fld"><span>연도</span><input id="f-year" type="number" inputmode="numeric" placeholder="${new Date().getFullYear()}" value="${esc(String(p.year || new Date().getFullYear()))}">
+       <span class="hint">날짜 일정 앞에 이 연도가 함께 표시돼요.</span></label>
      <label class="fld"><span>기간 (선택)</span><input id="f-days" type="text" placeholder="예) 2박3일 · 7/16~18" value="${esc(p.days)}"></label>`,
     async () => {
       const title = $("#f-title").value.trim(); if (!title) return alert("코스 이름을 입력해줘.");
       const days = $("#f-days").value;
-      if (editing) { await store.updatePlan(rid, planId, { title, days }); goDetail(planId); }
-      else { const np = await store.addPlan(rid, { title, days }); goDetail(np.id); }
+      const year = parseInt($("#f-year").value, 10) || new Date().getFullYear();
+      if (editing) { await store.updatePlan(rid, planId, { title, days, year }); goDetail(planId); }
+      else { const np = await store.addPlan(rid, { title, days, year }); goDetail(np.id); }
     }, back);
 }
 function hm(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})$/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
