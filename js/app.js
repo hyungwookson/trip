@@ -411,6 +411,18 @@ function goPlanForm(planId) {
       else { const np = await store.addPlan(rid, { title, days }); goDetail(np.id); }
     }, back);
 }
+function hm(t) { const m = (t || "").match(/^(\d{1,2}):(\d{2})$/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+function parseRange(time) {
+  const parts = (time || "").split("~").map((s) => s.trim());
+  const s = hm(parts[0]); if (s == null) return null;
+  const e = parts[1] ? hm(parts[1]) : s;
+  return { s, e: e == null ? s : e };
+}
+function rangesClash(a, b) {
+  if (!a || !b) return false;
+  const ae = a.e === a.s ? a.s + 1 : a.e, be = b.e === b.s ? b.s + 1 : b.e;
+  return a.s < be && b.s < ae;
+}
 function goItemForm(itemId) {
   const rid = current.regionId, pid = current.planId, editing = !!itemId;
   const it = editing ? store.item(rid, pid, itemId) : { group: "", time: "", label: "", kind: "place" };
@@ -430,6 +442,7 @@ function goItemForm(itemId) {
      <div class="fld"><span>시간 (선택)</span><div class="time-row">
         <input id="f-ts" type="time" value="${esc(ts || "")}"><span class="time-sep">~</span><input id="f-te" type="time" value="${esc(te || "")}"></div>
         <span class="hint">시간을 넣으면 그 날짜 안에서 시간순으로 자동 정렬돼요.</span></div>
+     <div class="fld"><span>그 날짜 일정</span><div id="day-preview" class="day-preview"></div></div>
      <label class="fld"><span>내용</span><input id="f-label" type="text" placeholder="예) 오후 전시" value="${esc(it.label)}"></label>`,
     async () => {
       const label = $("#f-label").value.trim(); if (!label) return alert("내용을 입력해줘.");
@@ -440,11 +453,29 @@ function goItemForm(itemId) {
       goDetail(pid);
     }, back);
   segToggle("#f-kind");
+
+  const updatePreview = () => {
+    const group = $("#f-group").value.trim();
+    const box = $("#day-preview"); if (!box) return;
+    const entered = parseRange(($("#f-ts").value && $("#f-te").value) ? `${$("#f-ts").value}~${$("#f-te").value}` : $("#f-ts").value || "");
+    const rows = (store.plan(rid, pid).items || [])
+      .filter((x) => x.group === group && x.id !== itemId)
+      .sort((a, b) => { const sa = parseStart(a.time), sb = parseStart(b.time); return sa === sb ? 0 : sa - sb; });
+    if (!group) { box.innerHTML = `<div class="dp-empty">날짜를 고르면 그날 일정이 여기 보여요.</div>`; return; }
+    if (!rows.length) { box.innerHTML = `<div class="dp-empty">이 날짜엔 다른 일정이 없어요.</div>`; return; }
+    box.innerHTML = rows.map((x) => {
+      const clash = entered && rangesClash(entered, parseRange(x.time));
+      return `<div class="dp-row ${clash ? "clash" : ""}"><span class="dp-time">${esc(x.time || "—")}</span><span class="dp-label">${esc(x.label)}</span>${clash ? `<span class="dp-warn">겹침</span>` : ""}</div>`;
+    }).join("");
+  };
   document.querySelectorAll(".grp-chip").forEach((c) => c.onclick = () => {
     $("#f-group").value = c.dataset.g;
     document.querySelectorAll(".grp-chip").forEach((x) => x.classList.remove("on"));
     c.classList.add("on");
+    updatePreview();
   });
+  ["#f-group", "#f-ts", "#f-te"].forEach((sel) => { const el = $(sel); if (el) el.addEventListener("input", updatePreview); });
+  updatePreview();
 }
 function goOptionForm(itemId, optId) {
   const rid = current.regionId, pid = current.planId, editing = !!optId;
