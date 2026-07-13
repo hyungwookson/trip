@@ -27,7 +27,7 @@ export const SEED = {
         { id: "it-716-1", group: "7/16 (수)", time: "17:00~17:20", label: "퇴근 후 숙소로 출발", kind: "note", selectedId: null, options: [] },
         { id: "it-716-2", group: "7/16 (수)", time: "20:30~21:30", label: "숙소 도착", kind: "note", selectedId: null, options: [] },
         { id: "it-716-3", group: "7/16 (수)", time: "22:00~24:00", label: "늦은 저녁 & 음주", kind: "place", selectedId: null, options: [] },
-        { id: "it-716-stay", group: "7/16 (수)", time: "숙박", label: "1박 숙소", kind: "place", selectedId: null, options: stay(1) },
+        { id: "it-716-stay", group: "7/16 (수)", time: "숙박", label: "숙소", kind: "place", selectedId: null, options: stay(1) },
 
         // ── 7/17 (목) ──
         { id: "it-717-1", group: "7/17 (목)", time: "09:00", label: "기상", kind: "note", selectedId: null, options: [] },
@@ -45,7 +45,7 @@ export const SEED = {
         ]},
         { id: "it-717-6", group: "7/17 (목)", time: "17:00~18:00", label: "숙소 도착", kind: "note", selectedId: null, options: [] },
         { id: "it-717-7", group: "7/17 (목)", time: "18:00~23:00", label: "저녁식사 & 해변산책", kind: "place", selectedId: null, options: [] },
-        { id: "it-717-stay", group: "7/17 (목)", time: "숙박", label: "2박 숙소", kind: "place", selectedId: null, options: stay(2) },
+        { id: "it-717-stay", group: "7/17 (목)", time: "숙박", label: "숙소", kind: "place", selectedId: null, options: stay(2) },
 
         // ── 7/18 (금) ──
         { id: "it-718-1", group: "7/18 (금)", time: "09:00", label: "기상", kind: "note", selectedId: null, options: [] },

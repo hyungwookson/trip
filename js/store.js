@@ -16,6 +16,49 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 export const genId = () => Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
 
 let onChangeCb = null;
+let onEventsCb = null;
+
+// 원격 변경 감지용: 상태를 납작한 맵으로 요약
+function snapshotState() {
+  const items = {}, photos = {}, visited = {};
+  for (const rid in stateData.plans)
+    for (const p of (stateData.plans[rid] || []))
+      for (const it of (p.items || [])) {
+        items[it.id] = {
+          rid, pid: p.id, label: it.label, group: it.group,
+          selectedId: it.selectedId || "",
+          selName: it.selectedId ? ((it.options || []).find((o) => o.id === it.selectedId) || {}).name || "" : "",
+          memories: (it.memories || []).length,
+          optCount: (it.options || []).length,
+        };
+        photos[it.id] = (it.memories || []).length;
+      }
+  for (const rid in stateData.albums) photos["album:" + rid] = (stateData.albums[rid] || []).length;
+  for (const rid in stateData.visited) if (stateData.visited[rid]) visited[rid] = true;
+  return { items, photos, visited, albums: { ...stateData.albums } };
+}
+function diffState(a, b) {
+  const ev = [];
+  // 다녀옴
+  for (const rid in b.visited) if (!a.visited[rid]) ev.push({ type: "visited", rid, text: "다녀온 곳으로 표시했어요" });
+  // 일정
+  for (const id in b.items) {
+    const nb = b.items[id], na = a.items[id];
+    if (!na) { ev.push({ type: "item-add", rid: nb.rid, pid: nb.pid, itemId: id, text: `새 일정 · ${nb.label}` }); continue; }
+    if (na.selectedId !== nb.selectedId && nb.selectedId)
+      ev.push({ type: "select", rid: nb.rid, pid: nb.pid, itemId: id, text: `${nb.label} — ${nb.selName} 선택` });
+    if (nb.optCount > na.optCount)
+      ev.push({ type: "option-add", rid: nb.rid, pid: nb.pid, itemId: id, text: `${nb.label} — 선택지 추가` });
+    if (nb.memories > na.memories)
+      ev.push({ type: "photo", rid: nb.rid, pid: nb.pid, itemId: id, text: `${nb.label} — 추억 사진 ${nb.memories - na.memories}장` });
+  }
+  // 지역 앨범 사진
+  for (const rid in b.albums) {
+    const nb = (b.albums[rid] || []).length, na = (a.albums[rid] || []).length;
+    if (nb > na) ev.push({ type: "album", rid, text: `사진 ${nb - na}장 추가` });
+  }
+  return ev;
+}
 const photoCache = new Map();
 
 // ---- Firebase 핸들 (데이터/사진 공용) ----
@@ -46,7 +89,11 @@ function firebaseData() {
       else { stateData.plans = clone(SEED); stateData.votes = {}; stateData.visited = {}; stateData.albums = {}; stateData.photoMeta = {}; await fs.setDoc(ref, { plans: stateData.plans, votes: stateData.votes, visited: stateData.visited, albums: stateData.albums, photoMeta: stateData.photoMeta }); }
       fs.onSnapshot(ref, (s) => {
         if (!s.exists()) return;
+        if (s.metadata.hasPendingWrites) return;      // 내가 방금 쓴 건 알림 대상 아님
+        const prev = snapshotState();
         const d = s.data(); stateData.plans = d.plans || {}; stateData.votes = d.votes || {}; stateData.visited = d.visited || {}; stateData.albums = d.albums || {}; stateData.photoMeta = d.photoMeta || {};
+        const events = diffState(prev, snapshotState());
+        if (events.length && onEventsCb) onEventsCb(events);
         if (onChangeCb) onChangeCb();
       });
     },
@@ -119,6 +166,8 @@ export const store = {
           }
           // 이름에 '숙소/호텔/펜션/스테이'가 들어간 장소 일정 → 숙소 종류로 승격 (1회)
           if (it.kind === "place" && /숙소|호텔|펜션|스테이|리조트/.test(it.label || "")) { it.kind = "stay"; changed = true; }
+          // 숙소 라벨의 'N박' 접두 제거 (날짜 헤더에 이미 며칠인지 나옴)
+          if (it.kind === "stay" && /^\s*\d+\s*박\s*숙소\s*$/.test(it.label || "")) { it.label = "숙소"; changed = true; }
         }
         // 구버전: 통합 "숙소" 그룹 → 각 날짜에 숙소 일정으로 복제 (원본 "숙소" 그룹은 제거)
         const stayItems = (p.items || []).filter((it) => it.group === "숙소");
@@ -138,6 +187,7 @@ export const store = {
     if (changed) { try { await this._persist(); } catch (e) {} }
   },
   subscribe(cb) { onChangeCb = cb; },
+  subscribeEvents(cb) { onEventsCb = cb; },
   _persist() { return dataBackend.persist(); },
 
   // ---- 구글 로그인 / 주인 확인 ----

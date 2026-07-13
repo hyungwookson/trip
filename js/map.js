@@ -103,3 +103,8 @@ export function refreshMarkers() {
   if (markerLayer) buildMarkers();
 }
 export function regionCount() { return total; }
+export function regionName(code) {
+  let name = code;
+  if (geoLayer) geoLayer.eachLayer((l) => { if (l.feature.properties.code === code) name = l.feature.properties.name; });
+  return name;
+}

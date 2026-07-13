@@ -4,7 +4,7 @@
 
 import { store } from "./store.js";
 import { esc, optionLink, readPhotoDate } from "./util.js";
-import { initMap, refreshMarkers, regionCount } from "./map.js";
+import { initMap, refreshMarkers, regionCount, regionName } from "./map.js";
 
 const $ = (s) => document.querySelector(s);
 const showScreen = (id) =>
@@ -12,6 +12,29 @@ const showScreen = (id) =>
 
 const current = { regionId: null, regionName: "", planId: null };
 let formCancel = () => goMap();
+
+// ---- 현재 화면 기억 (새로고침해도 유지) ----
+const NAV_KEY = "trip-nav";
+function saveNav(screen) {
+  try {
+    localStorage.setItem(NAV_KEY, JSON.stringify({
+      screen, regionId: current.regionId, regionName: current.regionName, planId: current.planId,
+    }));
+  } catch (e) {}
+}
+function restoreNav() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(NAV_KEY) || "null"); } catch (e) {}
+  if (!s || !s.screen || s.screen === "s-map") return false;
+  if (s.screen === "s-detail" && s.regionId && s.planId && store.plan(s.regionId, s.planId)) {
+    current.regionId = s.regionId; current.regionName = s.regionName || "";
+    goDetail(s.planId); return true;
+  }
+  if (s.screen === "s-region" && s.regionId) {
+    goRegion(s.regionId, s.regionName || ""); return true;
+  }
+  return false;
+}
 
 // ---- 모션 헬퍼 ----
 function applyStagger(sel, root) {
@@ -50,14 +73,14 @@ function clearPetals() { document.querySelectorAll("#celebrate .petal").forEach(
 // ============================================================
 function goMap() {
   current.regionId = null; current.planId = null;
-  showScreen("s-map"); refreshMarkers(); updateProgress();
+  showScreen("s-map"); refreshMarkers(); updateProgress(); saveNav("s-map");
 }
 function goRegion(regionId, regionName) {
   current.regionId = regionId; current.regionName = regionName; current.planId = null;
-  renderRegion(true); showScreen("s-region");
+  renderRegion(true); showScreen("s-region"); saveNav("s-region");
 }
 function goDetail(planId) {
-  current.planId = planId; renderDetail(true); showScreen("s-detail");
+  current.planId = planId; renderDetail(true); showScreen("s-detail"); saveNav("s-detail");
 }
 
 // ============================================================
@@ -115,6 +138,33 @@ function renderRegion(animate) {
   loadThumbs();
   if (animate) applyStagger(".plan-row", body);
 }
+// ---- 진행 표시 / 완료 토스트 ----
+let busyCount = 0;
+function showBusy(text) {
+  busyCount++;
+  let el = $("#busy");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "busy";
+    el.innerHTML = `<div class="busy-card"><div class="spinner"></div><div class="busy-text"></div></div>`;
+    document.body.appendChild(el);
+  }
+  el.querySelector(".busy-text").textContent = text || "올리는 중…";
+  el.classList.add("on");
+}
+function setBusyText(text) { const el = $("#busy"); if (el) el.querySelector(".busy-text").textContent = text; }
+function hideBusy() {
+  busyCount = Math.max(0, busyCount - 1);
+  if (busyCount === 0) { const el = $("#busy"); if (el) el.classList.remove("on"); }
+}
+function toast(text) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = text;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("on"));
+  setTimeout(() => { t.classList.remove("on"); setTimeout(() => t.remove(), 300); }, 2200);
+}
+
 // 갤러리에서 사진 고르기 (여러 장 가능)
 //  · iOS: accept="image/*" 가 가장 호환이 좋음 (구체 MIME 나열 시 HEIC가 회색 처리돼 못 고름)
 //  · Android: 구체 타입을 나열해야 사진 선택기(갤러리)가 확실히 뜸
@@ -123,7 +173,9 @@ const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
 const IMG_ACCEPT = IS_IOS
   ? "image/*"
   : "image/jpeg,image/png,image/heic,image/heif,image/webp,image/gif,image/*";
+let uploading = false;
 function pickImages(onFiles) {
+  if (uploading) return;                 // 업로드 중엔 중복 선택 차단
   const inp = document.createElement("input");
   inp.type = "file";
   inp.accept = IMG_ACCEPT;
@@ -134,26 +186,35 @@ function pickImages(onFiles) {
   inp.onchange = async () => {
     const files = Array.from(inp.files || []);
     inp.remove();
-    if (files.length) await onFiles(files);
+    if (!files.length) return;
+    uploading = true;
+    showBusy(files.length > 1 ? `사진 올리는 중… (0/${files.length})` : "사진 올리는 중…");
+    try {
+      await onFiles(files);
+      toast(files.length > 1 ? `사진 ${files.length}장 올렸어요` : "사진을 올렸어요");
+    } catch (e) {
+      console.error(e);
+      alert("사진 처리 실패: " + (e.message || e));
+    } finally {
+      hideBusy(); uploading = false;
+    }
   };
   inp.click();
 }
 function pickRegionPhoto(regionId) {
   pickImages(async (files) => {
-    try {
-      let lastId = null, lastMeta = null;
-      for (const f of files) {
-        const date = await readPhotoDate(f);
-        const id = await store.addRegionPhoto(regionId, f);
-        const meta = { place: current.regionName, date, memo: "" };
-        await store.setPhotoMeta(id, meta);
-        lastId = id; lastMeta = meta;
-      }
-      renderRegion(false);
-      // 한 장이면 정보 확인 시트, 여러 장이면 그대로 저장(나중에 각자 편집 가능)
-      if (files.length === 1 && lastId)
-        metaSheet(lastMeta, async (m) => { await store.setPhotoMeta(lastId, m); renderRegion(false); });
-    } catch (e) { alert("사진 처리 실패: " + e.message); }
+    let lastId = null, lastMeta = null, i = 0;
+    for (const f of files) {
+      if (files.length > 1) setBusyText(`사진 올리는 중… (${++i}/${files.length})`);
+      const date = await readPhotoDate(f);
+      const id = await store.addRegionPhoto(regionId, f);
+      const meta = { place: current.regionName, date, memo: "" };
+      await store.setPhotoMeta(id, meta);
+      lastId = id; lastMeta = meta;
+    }
+    renderRegion(false);
+    if (files.length === 1 && lastId)
+      metaSheet(lastMeta, async (m) => { await store.setPhotoMeta(lastId, m); renderRegion(false); });
   });
 }
 
@@ -256,7 +317,7 @@ function slotBlock(it) {
   const opts = it.options.map((op) => optCard(it, op)).join("");
   return `<div class="slot" data-item="${it.id}">
     <div class="slot-head">
-      <div class="slot-when">${it.time ? `<span class="slot-time">${esc(it.time)}</span>` : ""}<span class="slot-label">${it.kind === "stay" ? `<span class="stay-tag">숙소</span>` : ""}${esc(it.label)}</span></div>
+      <div class="slot-when">${it.time ? `<span class="slot-time">${esc(it.time)}</span>` : ""}<span class="slot-label">${it.kind === "stay" && viewMode !== "stay" ? `<span class="stay-tag">숙소</span>` : ""}${esc(it.label)}</span></div>
       ${state}
     </div>
     ${opts || `<div class="slot-empty">장소 미정 — 선택지를 추가해봐요.</div>`}
@@ -406,28 +467,27 @@ function loadThumbs() {
 // ============================================================
 function pickPhoto(itemId, optId) {
   pickImages(async (files) => {
-    try { await store.setPhoto(current.regionId, current.planId, itemId, optId, files[0]); renderDetail(false); }
-    catch (e) { alert("사진 처리 실패: " + e.message); }
+    await store.setPhoto(current.regionId, current.planId, itemId, optId, files[0]);
+    renderDetail(false);
   });
 }
 function pickItemMemory(itemId) {
   pickImages(async (files) => {
-    try {
-      const it = store.item(current.regionId, current.planId, itemId);
-      const selOpt = it && it.selectedId ? it.options.find((o) => o.id === it.selectedId) : null;
-      const place = (selOpt && selOpt.name) || (it && it.label) || current.regionName;
-      let lastId = null, lastMeta = null;
-      for (const f of files) {
-        const date = await readPhotoDate(f);
-        const id = await store.addItemMemory(current.regionId, current.planId, itemId, f);
-        const meta = { place, date, memo: "" };
-        await store.setPhotoMeta(id, meta);
-        lastId = id; lastMeta = meta;
-      }
-      renderDetail(false);
-      if (files.length === 1 && lastId)
-        metaSheet(lastMeta, async (m) => { await store.setPhotoMeta(lastId, m); renderDetail(false); });
-    } catch (e) { alert("사진 처리 실패: " + e.message); }
+    const it = store.item(current.regionId, current.planId, itemId);
+    const selOpt = it && it.selectedId ? it.options.find((o) => o.id === it.selectedId) : null;
+    const place = (selOpt && selOpt.name) || (it && it.label) || current.regionName;
+    let lastId = null, lastMeta = null, i = 0;
+    for (const f of files) {
+      if (files.length > 1) setBusyText(`사진 올리는 중… (${++i}/${files.length})`);
+      const date = await readPhotoDate(f);
+      const id = await store.addItemMemory(current.regionId, current.planId, itemId, f);
+      const meta = { place, date, memo: "" };
+      await store.setPhotoMeta(id, meta);
+      lastId = id; lastMeta = meta;
+    }
+    renderDetail(false);
+    if (files.length === 1 && lastId)
+      metaSheet(lastMeta, async (m) => { await store.setPhotoMeta(lastId, m); renderDetail(false); });
   });
 }
 function moveSheet(fromItemId, optId) {
@@ -768,6 +828,89 @@ function onRemoteChange() {
 }
 
 // ============================================================
+// 알림 (상대가 바꾼 것)
+// ============================================================
+let notifs = [];       // {id, text, region, rid, pid, itemId, ts, read}
+let notifOpen = false;
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return `${Math.floor(s / 86400)}일 전`;
+}
+function onRemoteEvents(events) {
+  events.forEach((e) => {
+    notifs.unshift({
+      id: Math.random().toString(36).slice(2),
+      text: e.text, region: regionName(e.rid),
+      rid: e.rid, pid: e.pid || null, itemId: e.itemId || null,
+      ts: Date.now(), read: false,
+    });
+  });
+  notifs = notifs.slice(0, 40);
+  renderBell();
+}
+function unreadCount() { return notifs.filter((n) => !n.read).length; }
+function renderBell() {
+  document.querySelectorAll(".bell").forEach((b) => {
+    const n = unreadCount();
+    b.classList.toggle("has", n > 0);
+    const badge = b.querySelector(".bell-badge");
+    if (badge) { badge.textContent = n > 99 ? "99+" : n; badge.style.display = n ? "flex" : "none"; }
+  });
+  const panel = $("#notif-panel");
+  if (panel && notifOpen) panel.innerHTML = notifListHTML();
+}
+function notifListHTML() {
+  if (!notifs.length) return `<div class="nt-empty">새로운 소식이 없어요.</div>`;
+  return `<div class="nt-head"><span>알림</span><button class="nt-clear" data-a="clear">모두 읽음</button></div>` +
+    notifs.map((n) => `<button type="button" class="nt-item ${n.read ? "" : "new"}" data-n="${n.id}">
+      <span class="nt-region">${esc(n.region || "")}</span>
+      <span class="nt-text">${esc(n.text)}</span>
+      <span class="nt-time">${esc(timeAgo(n.ts))}</span>
+    </button>`).join("");
+}
+function toggleNotif(force) {
+  notifOpen = force != null ? force : !notifOpen;
+  let panel = $("#notif-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "notif-panel";
+    document.body.appendChild(panel);
+    document.addEventListener("click", (e) => {
+      if (notifOpen && !panel.contains(e.target) && !e.target.closest(".bell")) toggleNotif(false);
+    });
+  }
+  panel.classList.toggle("open", notifOpen);
+  if (notifOpen) {
+    panel.innerHTML = notifListHTML();
+    panel.querySelector('[data-a="clear"]')?.addEventListener("click", () => {
+      notifs.forEach((n) => (n.read = true)); renderBell();
+    });
+    panel.querySelectorAll("[data-n]").forEach((el) => el.onclick = () => {
+      const n = notifs.find((x) => x.id === el.dataset.n); if (!n) return;
+      n.read = true; toggleNotif(false); renderBell();
+      jumpTo(n);
+    });
+  }
+}
+function jumpTo(n) {
+  const rname = regionName(n.rid);
+  if (n.pid && store.plan(n.rid, n.pid)) {
+    current.regionId = n.rid; current.regionName = rname;
+    goDetail(n.pid);
+    if (n.itemId) setTimeout(() => {
+      const el = document.querySelector(`.slot[data-item="${n.itemId}"], .note-row[data-item="${n.itemId}"]`);
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); }
+    }, 260);
+  } else {
+    goRegion(n.rid, rname);
+  }
+}
+
+// ============================================================
 // 부팅 + 입장 퀴즈
 // ============================================================
 const PASS_KEY = "trip-pass";
@@ -790,9 +933,13 @@ async function startApp() {
   try {
     await store.load();
     store.subscribe(onRemoteChange);
+    store.subscribeEvents(onRemoteEvents);
     await initMap({ onOpenRegion: goRegion, onReady: updateProgress });
     updateProgress();
+    document.querySelectorAll(".bell").forEach((b) => b.onclick = (e) => { e.stopPropagation(); toggleNotif(); });
+    renderBell();
     appStarted = true;
+    restoreNav();   // 새로고침 전 화면으로 복귀
   } catch (e) {
     console.error("startApp 실패:", e);
     showFatal("불러오기 실패: " + (e.code || e.message || e));
